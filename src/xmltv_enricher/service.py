@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -62,11 +63,21 @@ class EnrichmentService:
         return Path(self.settings.xmltv_file).read_text(encoding="utf-8")
 
     async def refresh(self, clear_cache: bool = False) -> dict[str, Any]:
+        async for _ in self.refresh_stream(clear_cache=clear_cache):
+            pass
+        return self.last_stats
+
+    async def refresh_stream(self, clear_cache: bool = False):
         if self._refresh_lock.locked():
             logger.info("Refresh requested while another refresh is already running")
-            return self.last_stats
+            yield self._format_progress_line("refresh already running")
+            yield self._format_json_line(self.last_stats)
+            return
 
         async with self._refresh_lock:
+            yield self._format_progress_line(
+                f"refresh started clear_cache={clear_cache} input_mode={self.settings.input_mode}"
+            )
             self._set_progress(state="running", phase="starting", clear_cache=clear_cache, last_error=None)
             logger.info("Refresh started clear_cache=%s input_mode=%s", clear_cache, self.settings.input_mode)
             try:
@@ -74,12 +85,16 @@ class EnrichmentService:
                     self._set_progress(phase="clearing_cache")
                     self.cache.clear()
                     logger.info("Cache cleared")
+                    yield self._format_progress_line("cache cleared")
 
                 self._set_progress(phase="loading_input")
+                yield self._format_progress_line("loading input xmltv")
                 xml_text = await self.load_input_xml()
                 logger.info("Input XML loaded (%s bytes)", len(xml_text.encode("utf-8")))
+                yield self._format_progress_line(f"input loaded bytes={len(xml_text.encode('utf-8'))}")
 
                 self._set_progress(phase="parsing_xml")
+                yield self._format_progress_line("parsing xmltv")
                 source_tree = parse_xmltv(xml_text)
                 root = source_tree.getroot()
                 channels = build_channel_lookup(root)
@@ -92,6 +107,9 @@ class EnrichmentService:
                     processed_programmes=0,
                 )
                 logger.info("Parsed XMLTV channels=%s programmes=%s", len(channels), total_programmes)
+                yield self._format_progress_line(
+                    f"parsed xmltv channels={len(channels)} programmes={total_programmes}"
+                )
 
                 results: list[ClassificationResult] = []
                 for index, programme in enumerate(programmes, start=1):
@@ -108,8 +126,13 @@ class EnrichmentService:
                             context.title,
                             result.final_category,
                         )
+                        yield self._format_progress_line(
+                            f"classification {index}/{total_programmes} title={context.title!r} "
+                            f"category={result.final_category!r}"
+                        )
 
                 self._set_progress(phase="writing_output")
+                yield self._format_progress_line("writing output files")
                 enriched_tree = enrich_tree(source_tree, results)
                 enriched_root = enriched_tree.getroot()
                 for programme, result in zip(enriched_root.findall("programme"), results, strict=True):
@@ -124,6 +147,7 @@ class EnrichmentService:
                     self.settings.output_epg_path,
                     self.settings.output_genres_path,
                 )
+                yield self._format_progress_line("output files written")
 
                 self._set_progress(
                     state="idle",
@@ -138,10 +162,14 @@ class EnrichmentService:
                     last_error=None,
                 )
                 logger.info("Refresh completed successfully")
-                return self.last_stats
+                yield self._format_progress_line("refresh completed")
+                yield self._format_json_line(self.last_stats)
+                return
             except Exception as exc:
                 logger.exception("Refresh failed")
                 self._set_progress(state="error", phase="failed", last_error=str(exc))
+                yield self._format_progress_line(f"refresh failed error={exc}")
+                yield self._format_json_line(self.last_stats)
                 raise
 
     async def inspect(self, title: str) -> dict[str, Any]:
@@ -177,3 +205,9 @@ class EnrichmentService:
         }
         base.update(updates)
         self.last_stats = base
+
+    def _format_progress_line(self, message: str) -> str:
+        return f"{message}\n"
+
+    def _format_json_line(self, payload: dict[str, Any]) -> str:
+        return f"{json.dumps(payload, ensure_ascii=False)}\n"

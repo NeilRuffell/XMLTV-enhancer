@@ -4,6 +4,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
+from starlette.responses import StreamingResponse
 
 from .config import load_settings
 from .service import EnrichmentService
@@ -21,8 +22,8 @@ async def health() -> dict:
 
 
 @app.get("/refresh")
-async def refresh(clear: int = Query(default=0)) -> dict:
-    return await service.refresh(clear_cache=bool(clear))
+async def refresh(clear: int = Query(default=0)) -> StreamingResponse:
+    return StreamingResponse(service.refresh_stream(clear_cache=bool(clear)), media_type="text/plain; charset=utf-8")
 
 
 @app.get("/stats")
