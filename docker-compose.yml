@@ -1,0 +1,15 @@
+services:
+  epg-enricher:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data
+    environment:
+      INPUT_MODE: "xmltv_url"
+      XMLTV_URL: ""
+      TMDB_TOKEN: ""
+      TMDB_LANGUAGE: "en-US"
+      TMDB_REGION: "CA"
+      PORT: "8765"
+      REFRESH_SECONDS: "21600"
