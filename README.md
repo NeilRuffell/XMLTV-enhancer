@@ -37,3 +37,31 @@ Use `INPUT_MODE=xmltv_url` with `XMLTV_URL` for a remote guide, or switch back t
 - `/genres.xml`
 - `/inspect?title=...`
 - `/audit`
+
+## TrueNAS Portainer
+
+This repo includes a GitHub Actions workflow at [.github/workflows/publish-ghcr.yml](/home/nruffell/Projects/XMLTV-enhancer/.github/workflows/publish-ghcr.yml:1) that publishes a container image to GHCR on every push to `main`.
+
+After the first successful workflow run, deploy this stack in Portainer:
+
+```yaml
+services:
+  epg-enricher:
+    image: ghcr.io/neilruffell/xmltv-enhancer:latest
+    container_name: xmltv-enhancer
+    ports:
+      - "8765:8765"
+    volumes:
+      - /mnt/zfs-01-ssd/apps/xmltv-enhancer:/data
+    environment:
+      INPUT_MODE: "xmltv_url"
+      XMLTV_URL: "http://truenas-bc-01:36400/a22f06d1-79ce-4b5b-9a53-02f117c1f71c/epg.xml"
+      TMDB_TOKEN: "YOUR_TOKEN"
+      TMDB_LANGUAGE: "en-US"
+      TMDB_REGION: "CA"
+      PORT: "8765"
+      REFRESH_SECONDS: "21600"
+    restart: unless-stopped
+```
+
+If GHCR package visibility is private by default, make the package public in GitHub before Portainer tries to pull it.
