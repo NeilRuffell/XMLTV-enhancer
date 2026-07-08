@@ -123,3 +123,31 @@ async def test_classifier_uses_high_confidence_special_rule(tmp_path):
     )
     assert result.source == "special_rule"
     assert result.final_category == "Sports - Football"
+
+
+@pytest.mark.anyio
+async def test_tmdb_title_match_beats_news_wording_in_description(tmp_path):
+    classifier = Classifier(StubTMDb(), FileCache(tmp_path, "v1"))
+    result = await classifier.classify(
+        ProgramContext(
+            title="Seinfeld",
+            description="He shares news with his wife after a strange day.",
+            channel_name="Local TV",
+        )
+    )
+    assert result.source == "tmdb"
+    assert result.final_category == "Entertainment - Comedy"
+
+
+@pytest.mark.anyio
+async def test_unknown_title_with_news_wording_does_not_become_news_without_channel_signal(tmp_path):
+    classifier = Classifier(StubTMDb(), FileCache(tmp_path, "v1"))
+    result = await classifier.classify(
+        ProgramContext(
+            title="Unknown Sitcom",
+            description="He shares news with his wife after dinner.",
+            channel_name="General Entertainment",
+        )
+    )
+    assert result.source == "fallback"
+    assert result.final_category == "Other Unknown"

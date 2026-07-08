@@ -114,9 +114,16 @@ class Classifier:
 
     async def classify(self, program: ProgramContext) -> ClassificationResult:
         candidates = title_candidates(program.title)
+        cache_key = self._cache_key(program, candidates)
+        cached = self.cache.get(cache_key)
+        if cached:
+            return ClassificationResult(**cached)
+
+        tmdb_candidates = await self._search_tmdb(program)
+        chosen = self._pick_tmdb_candidate(program, tmdb_candidates)
         special = self._detect_special(program)
-        if special:
-            return ClassificationResult(
+        if chosen is None and special is not None:
+            result = ClassificationResult(
                 source="special_rule",
                 media_type=None,
                 title=program.title,
@@ -127,16 +134,9 @@ class Classifier:
                 decision_reason=special["reason"],
                 special_detection=special,
                 normalized_candidates=candidates,
+                tmdb_candidates=tmdb_candidates,
             )
-
-        cache_key = self._cache_key(program, candidates)
-        cached = self.cache.get(cache_key)
-        if cached:
-            return ClassificationResult(**cached)
-
-        tmdb_candidates = await self._search_tmdb(program)
-        chosen = self._pick_tmdb_candidate(program, tmdb_candidates)
-        if chosen is None:
+        elif chosen is None:
             result = ClassificationResult(
                 source="fallback",
                 media_type=None,
@@ -172,16 +172,19 @@ class Classifier:
         description = self._normalize_text(program.description)
         content = f"{title} {description}".strip()
 
-        if self._matches_any(title, GAME_SHOW_TITLE_TERMS) or self._matches_any(content, GAME_SHOW_CONTENT_TERMS):
+        if self._matches_any(title, GAME_SHOW_TITLE_TERMS) or (
+            self._matches_any(title, GAME_SHOW_CONTENT_TERMS) and self._matches_any(channel, CHANNEL_SPORTS_TERMS) is False
+        ):
             return self._special_result("game_show", "Entertainment - Game Show", 0.92)
 
         business_channel = self._matches_any(channel, CHANNEL_BUSINESS_TERMS)
-        business_hits = self._count_matches(content, CONTENT_BUSINESS_TERMS)
-        if business_channel or business_hits >= 2:
+        business_title_hits = self._count_matches(title, CONTENT_BUSINESS_TERMS)
+        business_description_hits = self._count_matches(description, CONTENT_BUSINESS_TERMS)
+        if business_channel and (business_title_hits >= 1 or business_description_hits >= 1):
             return self._special_result(
                 "business",
                 "News & Documentaries - Business",
-                0.96 if business_channel else 0.88,
+                0.96,
             )
 
         sports_channel = self._matches_any(channel, CHANNEL_SPORTS_TERMS)
@@ -194,36 +197,41 @@ class Classifier:
             )
 
         news_channel = self._matches_any(channel, CHANNEL_NEWS_TERMS)
-        news_hits = self._count_matches(content, CONTENT_NEWS_TERMS)
-        if news_channel and news_hits >= 1:
+        news_title_hits = self._count_matches(title, CONTENT_NEWS_TERMS)
+        news_description_hits = self._count_matches(description, CONTENT_NEWS_TERMS)
+        if news_channel and (news_title_hits >= 1 or news_description_hits >= 1):
             return self._special_result("news", "News & Documentaries - News", 0.94)
-        if news_hits >= 2 and not sports_channel:
-            return self._special_result("news", "News & Documentaries - News", 0.82)
 
         children_channel = self._matches_any(channel, CHANNEL_CHILDREN_TERMS)
-        children_hits = self._count_matches(content, CONTENT_CHILDREN_TERMS)
-        if children_channel or children_hits >= 2:
+        children_title_hits = self._count_matches(title, CONTENT_CHILDREN_TERMS)
+        children_description_hits = self._count_matches(description, CONTENT_CHILDREN_TERMS)
+        if children_channel and (children_title_hits >= 1 or children_description_hits >= 1):
             return self._special_result("children", "Children", 0.95 if children_channel else 0.84)
+        if children_title_hits >= 2:
+            return self._special_result("children", "Children", 0.84)
 
         documentary_channel = self._matches_any(channel, CHANNEL_DOCUMENTARY_TERMS)
-        documentary_hits = self._count_matches(content, CONTENT_DOCUMENTARY_TERMS)
-        if documentary_channel and documentary_hits >= 1:
+        documentary_title_hits = self._count_matches(title, CONTENT_DOCUMENTARY_TERMS)
+        documentary_description_hits = self._count_matches(description, CONTENT_DOCUMENTARY_TERMS)
+        if documentary_channel and (documentary_title_hits >= 1 or documentary_description_hits >= 1):
             return self._special_result("documentary", "Documentary", 0.92)
-        if documentary_hits >= 2:
+        if documentary_title_hits >= 2:
             return self._special_result("documentary", "Documentary", 0.81)
 
         lifestyle_channel = self._matches_any(channel, CHANNEL_LIFESTYLE_TERMS)
-        lifestyle_hits = self._count_matches(content, CONTENT_LIFESTYLE_TERMS)
-        if lifestyle_channel and lifestyle_hits >= 1:
+        lifestyle_title_hits = self._count_matches(title, CONTENT_LIFESTYLE_TERMS)
+        lifestyle_description_hits = self._count_matches(description, CONTENT_LIFESTYLE_TERMS)
+        if lifestyle_channel and (lifestyle_title_hits >= 1 or lifestyle_description_hits >= 1):
             return self._special_result("lifestyle", "Lifestyle", 0.9)
-        if lifestyle_hits >= 2:
+        if lifestyle_title_hits >= 2:
             return self._special_result("lifestyle", "Lifestyle", 0.8)
 
         music_channel = self._matches_any(channel, CHANNEL_MUSIC_TERMS)
-        music_hits = self._count_matches(content, CONTENT_MUSIC_TERMS)
-        if music_channel and music_hits >= 1:
+        music_title_hits = self._count_matches(title, CONTENT_MUSIC_TERMS)
+        music_description_hits = self._count_matches(description, CONTENT_MUSIC_TERMS)
+        if music_channel and (music_title_hits >= 1 or music_description_hits >= 1):
             return self._special_result("music", "Music", 0.9)
-        if music_hits >= 2:
+        if music_title_hits >= 2:
             return self._special_result("music", "Music", 0.79)
         return None
 
@@ -294,8 +302,6 @@ class Classifier:
             ),
             default=0.0,
         )
-        description_similarity = jaccard_similarity(program.description, candidate["overview"])
-
         score = 0.0
         reasons: list[str] = []
         if exact_title_match:
@@ -309,10 +315,6 @@ class Classifier:
             reasons.append("moderate_title_similarity")
         else:
             reasons.append("weak_title_similarity")
-
-        if description_similarity >= 0.3:
-            score += min(description_similarity * 2.0, 1.5)
-            reasons.append("description_support")
 
         candidate_year = candidate["release_date"][:4] if candidate["release_date"] else ""
         if program.year and candidate_year:
@@ -354,7 +356,7 @@ class Classifier:
             "decision_reason": ",".join(reasons),
             "exact_title_match": exact_title_match,
             "title_similarity": round(title_similarity, 3),
-            "description_similarity": round(description_similarity, 3),
+            "description_similarity": round(jaccard_similarity(program.description, candidate["overview"]), 3),
         }
 
     def _resolve_genre_names(self, candidate: dict[str, Any]) -> list[str]:
