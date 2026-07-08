@@ -98,6 +98,8 @@ def inspect_payload(result: ClassificationResult, query: str) -> dict[str, Any]:
             "media_type": result.media_type,
             "title": result.title,
             "genres": result.genres,
+            "confidence": result.confidence,
+            "decision_reason": result.decision_reason,
             "final_category": result.final_category,
             "genre_id": result.genre_id,
         },

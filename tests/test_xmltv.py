@@ -21,6 +21,8 @@ def test_enrich_tree_rewrites_categories():
                 genres=["Comedy"],
                 final_category="Entertainment - Comedy",
                 genre_id="0x30",
+                confidence=7.0,
+                decision_reason="exact_normalized_title_match",
             )
         ],
     )

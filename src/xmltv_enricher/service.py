@@ -48,6 +48,8 @@ class EnrichmentService:
             "channels": 0,
             "processed_programmes": 0,
             "total_programmes": 0,
+            "source_counts": {"special_rule": 0, "tmdb": 0, "fallback": 0},
+            "fallback_rate": 0.0,
             "last_error": None,
         }
 
@@ -78,22 +80,22 @@ class EnrichmentService:
             yield self._format_progress_line(
                 f"refresh started clear_cache={clear_cache} input_mode={self.settings.input_mode}"
             )
-            self._set_progress(state="running", phase="starting", clear_cache=clear_cache, last_error=None)
+            self._set_progress(refresh_state="running", refresh_phase="starting", clear_cache=clear_cache, last_error=None)
             logger.info("Refresh started clear_cache=%s input_mode=%s", clear_cache, self.settings.input_mode)
             try:
                 if clear_cache:
-                    self._set_progress(phase="clearing_cache")
+                    self._set_progress(refresh_phase="clearing_cache")
                     self.cache.clear()
                     logger.info("Cache cleared")
                     yield self._format_progress_line("cache cleared")
 
-                self._set_progress(phase="loading_input")
+                self._set_progress(refresh_phase="loading_input")
                 yield self._format_progress_line("loading input xmltv")
                 xml_text = await self.load_input_xml()
                 logger.info("Input XML loaded (%s bytes)", len(xml_text.encode("utf-8")))
                 yield self._format_progress_line(f"input loaded bytes={len(xml_text.encode('utf-8'))}")
 
-                self._set_progress(phase="parsing_xml")
+                self._set_progress(refresh_phase="parsing_xml")
                 yield self._format_progress_line("parsing xmltv")
                 source_tree = parse_xmltv(xml_text)
                 root = source_tree.getroot()
@@ -101,7 +103,7 @@ class EnrichmentService:
                 programmes = root.findall("programme")
                 total_programmes = len(programmes)
                 self._set_progress(
-                    phase="classifying",
+                    refresh_phase="classifying",
                     channels=len(channels),
                     total_programmes=total_programmes,
                     processed_programmes=0,
@@ -112,31 +114,42 @@ class EnrichmentService:
                 )
 
                 results: list[ClassificationResult] = []
+                source_counts = {"special_rule": 0, "tmdb": 0, "fallback": 0}
                 for index, programme in enumerate(programmes, start=1):
                     context = programme_context(programme, channels)
                     result = await self.classifier.classify(context)
                     programme.set("data-media-type", result.media_type or "")
+                    programme.set("data-source", result.source)
+                    programme.set("data-confidence", f"{result.confidence:.3f}")
+                    programme.set("data-decision-reason", result.decision_reason)
                     results.append(result)
+                    source_counts[result.source] = source_counts.get(result.source, 0) + 1
                     self._set_progress(processed_programmes=index, total_programmes=total_programmes)
                     if index == 1 or index % 100 == 0 or index == total_programmes:
                         logger.info(
-                            "Classification progress %s/%s title=%r category=%r",
+                            "Classification progress %s/%s title=%r category=%r source=%s confidence=%.3f",
                             index,
                             total_programmes,
                             context.title,
                             result.final_category,
+                            result.source,
+                            result.confidence,
                         )
                         yield self._format_progress_line(
                             f"classification {index}/{total_programmes} title={context.title!r} "
-                            f"category={result.final_category!r}"
+                            f"category={result.final_category!r} source={result.source} "
+                            f"confidence={result.confidence:.3f}"
                         )
 
-                self._set_progress(phase="writing_output")
+                self._set_progress(refresh_phase="writing_output")
                 yield self._format_progress_line("writing output files")
                 enriched_tree = enrich_tree(source_tree, results)
                 enriched_root = enriched_tree.getroot()
                 for programme, result in zip(enriched_root.findall("programme"), results, strict=True):
                     programme.set("data-media-type", result.media_type or "")
+                    programme.set("data-source", result.source)
+                    programme.set("data-confidence", f"{result.confidence:.3f}")
+                    programme.set("data-decision-reason", result.decision_reason)
 
                 genres_tree = build_genres_tree(self.settings.map_other_unknown)
                 self.settings.data_dir.mkdir(parents=True, exist_ok=True)
@@ -147,11 +160,17 @@ class EnrichmentService:
                     self.settings.output_epg_path,
                     self.settings.output_genres_path,
                 )
+                fallback_rate = (source_counts["fallback"] / total_programmes) if total_programmes else 0.0
+                yield self._format_progress_line(
+                    "classification summary "
+                    f"special_rule={source_counts['special_rule']} tmdb={source_counts['tmdb']} "
+                    f"fallback={source_counts['fallback']} fallback_rate={fallback_rate:.3f}"
+                )
                 yield self._format_progress_line("output files written")
 
                 self._set_progress(
-                    state="idle",
-                    phase="complete",
+                    refresh_state="idle",
+                    refresh_phase=None,
                     programmes=total_programmes,
                     channels=len(channels),
                     processed_programmes=total_programmes,
@@ -159,6 +178,8 @@ class EnrichmentService:
                     cache_dir=str(self.settings.cache_dir),
                     classifier_version=classifier_signature(),
                     tmdb_available=self.tmdb.available,
+                    source_counts=source_counts,
+                    fallback_rate=round(fallback_rate, 3),
                     last_error=None,
                 )
                 logger.info("Refresh completed successfully")
@@ -167,7 +188,7 @@ class EnrichmentService:
                 return
             except Exception as exc:
                 logger.exception("Refresh failed")
-                self._set_progress(state="error", phase="failed", last_error=str(exc))
+                self._set_progress(refresh_state="error", refresh_phase="failed", last_error=str(exc))
                 yield self._format_progress_line(f"refresh failed error={exc}")
                 yield self._format_json_line(self.last_stats)
                 raise
@@ -198,6 +219,8 @@ class EnrichmentService:
             "channels": self.last_stats.get("channels", 0),
             "processed_programmes": self.last_stats.get("processed_programmes", 0),
             "total_programmes": self.last_stats.get("total_programmes", 0),
+            "source_counts": self.last_stats.get("source_counts", {"special_rule": 0, "tmdb": 0, "fallback": 0}),
+            "fallback_rate": self.last_stats.get("fallback_rate", 0.0),
             "cache_dir": self.last_stats.get("cache_dir", str(self.settings.cache_dir)),
             "classifier_version": self.last_stats.get("classifier_version", classifier_signature()),
             "tmdb_available": self.last_stats.get("tmdb_available", self.tmdb.available),

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-CLASSIFIER_VERSION = "2026-07-08"
+CLASSIFIER_VERSION = "2026-07-08-trustworthy-resolver-v1"
 
 ALLOWED_CATEGORIES = [
     "Movie",

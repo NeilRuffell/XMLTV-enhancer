@@ -40,6 +40,8 @@ class ClassificationResult:
     genres: list[str]
     final_category: str
     genre_id: str | None
-    special_detection: str | None = None
+    confidence: float
+    decision_reason: str
+    special_detection: dict[str, Any] | None = None
     tmdb_candidates: list[dict[str, Any]] = field(default_factory=list)
     normalized_candidates: list[str] = field(default_factory=list)
