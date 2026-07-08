@@ -123,5 +123,6 @@ TV_GENRE_MAP = {
 
 
 def classifier_signature() -> str:
-    payload = "|".join([CLASSIFIER_VERSION, *ALLOWED_CATEGORIES, *sorted(MAPPED_GENRE_IDS.items())])
+    mapping_entries = [f"{category}={genre_id}" for category, genre_id in sorted(MAPPED_GENRE_IDS.items())]
+    payload = "|".join([CLASSIFIER_VERSION, *ALLOWED_CATEGORIES, *mapping_entries])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
