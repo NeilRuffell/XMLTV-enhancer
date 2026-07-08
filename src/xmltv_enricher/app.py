@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .config import load_settings
 from .service import EnrichmentService
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 settings = load_settings()
 service = EnrichmentService(settings)
