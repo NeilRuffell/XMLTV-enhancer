@@ -34,6 +34,7 @@ def test_enrich_tree_rewrites_categories():
 
 def test_genres_tree_includes_other_unknown_without_mapping():
     tree = build_genres_tree()
-    genres = {genre.text: genre.get("type") for genre in tree.getroot().findall("genre")}
+    assert tree.getroot().findtext("name") == "XMLTV Enhancer Genre Mappings"
+    genres = {genre.text: genre.get("genreId") for genre in tree.getroot().findall("genre")}
     assert genres["Movie"] == "0x10"
     assert genres["Other Unknown"] is None

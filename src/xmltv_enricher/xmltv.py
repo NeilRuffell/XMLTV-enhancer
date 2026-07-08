@@ -72,14 +72,16 @@ def enrich_tree(tree: ET.ElementTree, results: list[ClassificationResult]) -> ET
 
 def build_genres_tree(map_other_unknown: bool = False) -> ET.ElementTree:
     root = ET.Element("genres")
+    name = ET.SubElement(root, "name")
+    name.text = "XMLTV Enhancer Genre Mappings"
     for category in ALLOWED_CATEGORIES:
         genre = ET.SubElement(root, "genre")
         genre.text = category
         genre_id = MAPPED_GENRE_IDS.get(category)
         if genre_id:
-            genre.set("type", genre_id)
+            genre.set("genreId", genre_id)
         elif category == "Other Unknown" and map_other_unknown:
-            genre.set("type", "0xF0")
+            genre.set("genreId", "0xF0")
     return ET.ElementTree(root)
 
 
