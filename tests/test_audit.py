@@ -39,3 +39,16 @@ def test_audit_flags_non_library_category_without_special_rule():
     )
     violations = audit_outputs(epg, build_genres_tree(), tmdb_available=True)
     assert "non_library_category_without_special_rule" in violations
+
+
+def test_audit_accepts_genres_xml_genre_id_schema():
+    epg = parse_xmltv(
+        """<tv>
+        <programme data-media-type="tv" data-source="tmdb" data-confidence="7.1">
+          <title>Seinfeld</title>
+          <category>Entertainment - Comedy</category>
+        </programme>
+        </tv>"""
+    )
+    violations = audit_outputs(epg, build_genres_tree(), tmdb_available=True)
+    assert "category_missing_from_genres_xml" not in violations

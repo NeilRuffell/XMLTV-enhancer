@@ -69,9 +69,10 @@ def audit_outputs(epg_tree: ET.ElementTree, genres_tree: ET.ElementTree, tmdb_av
             violations.append("entertainment_category_without_tv_resolution")
 
     for genre in genres_root.findall("genre"):
-        if genre.get("type") == "0x00":
+        genre_id = genre.get("genreId")
+        if genre_id == "0x00":
             violations.append("genre_id_0x00_used")
-        if (genre.text or "").strip() in MAPPED_GENRE_IDS and genre.get("type") != MAPPED_GENRE_IDS[(genre.text or "").strip()]:
+        if (genre.text or "").strip() in MAPPED_GENRE_IDS and genre_id != MAPPED_GENRE_IDS[(genre.text or "").strip()]:
             violations.append("category_missing_from_genres_xml")
 
     seen: list[str] = []
